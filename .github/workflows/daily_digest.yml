@@ -2,48 +2,45 @@ name: NewsAgent — Daily Digest
 
 on:
   schedule:
-    # 09:00 UTC = 06:00 Brasília (UTC-3)
-    - cron: '0 9 * * *'[cite: 1]
-  workflow_dispatch:  # permite disparar manualmente
+    - cron: '0 9 * * *'
+  workflow_dispatch:
 
 jobs:
   digest:
     runs-on: ubuntu-latest
-    timeout-minutes: 15[cite: 1]
+    timeout-minutes: 15
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4[cite: 1]
+        uses: actions/checkout@v4
 
       - name: Setup Python
-        uses: actions/setup-python@v5[cite: 1]
+        uses: actions/setup-python@v5
         with:
-          python-version: '3.11'[cite: 1]
-          # Cache removido para evitar o erro "No file matched to requirements.txt"
+          python-version: '3.11'
 
       - name: Instalar dependências
         run: |
           python -m pip install --upgrade pip
-          pip install aiohttp beautifulsoup4 lxml APScheduler python-dotenv requests
-          pip install groq[cite: 1]
+          pip install aiohttp beautifulsoup4 lxml APScheduler python-dotenv requests groq
 
       - name: Criar pastas
-        run: mkdir -p logs data[cite: 1]
+        run: mkdir -p logs data
 
       - name: Executar NewsAgent
         env:
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}[cite: 1]
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}[cite: 1]
-          AI_PROVIDER: ${{ secrets.AI_PROVIDER }}[cite: 1]
-          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}[cite: 1]
-          SEND_HOUR: '6'[cite: 1]
-          SEND_MINUTE: '0'[cite: 1]
-          MAX_NEWS: '10'[cite: 1]
-        run: python agent.py --now[cite: 1]
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          AI_PROVIDER: ${{ secrets.AI_PROVIDER }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          SEND_HOUR: '6'
+          SEND_MINUTE: '0'
+          MAX_NEWS: '10'
+        run: python agent.py --now
 
       - name: Upload logs como artefato
-        uses: actions/upload-artifact@v4[cite: 1]
-        if: always()[cite: 1]
+        uses: actions/upload-artifact@v4
+        if: always()
         with:
-          name: agent-logs-${{ github.run_id }}[cite: 1]
-          path: logs/[cite: 1]
+          name: agent-logs-${{ github.run_id }}
+          path: logs/
