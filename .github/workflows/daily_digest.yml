@@ -1,18 +1,18 @@
-name: NewsAgent — Daily Digest
+name: 🤖 Morning AI Briefing
 
 on:
   schedule:
-    # 09:00 UTC = 06:00 Brasília (UTC-3)
+   # 09:00 UTC = 06:00 Brasília (UTC-3)
     - cron: '0 9 * * *'
-  workflow_dispatch:  # permite disparar manualmente
+    timezone: "America/Sao_Paulo"  # Suporte novo de 2026 [^1^]
+  workflow_dispatch:  # Permite rodar manualmente para testes
 
 jobs:
-  digest:
+  briefing:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
-
+    
     steps:
-      - name: Checkout
+      - name: Checkout repo
         uses: actions/checkout@v4
 
       - name: Setup Python
@@ -21,28 +21,20 @@ jobs:
           python-version: '3.11'
           cache: 'pip'
 
-      - name: Instalar dependências
+      - name: Install dependencies
         run: pip install -r requirements.txt
-          pip install aiohttp beautifulsoup4 lxml APScheduler python-dotenv requests
-          pip install groq   # troque pelo seu provider
 
-      - name: Criar pastas
-        run: mkdir -p logs data
-
-      - name: Executar NewsAgent
+      - name: Run Morning Briefing
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID:   ${{ secrets.TELEGRAM_CHAT_ID }}
-          AI_PROVIDER:        ${{ secrets.AI_PROVIDER }}
-          GROQ_API_KEY:       ${{ secrets.GROQ_API_KEY }}
-          SEND_HOUR:          '6'
-          SEND_MINUTE:        '0'
-          MAX_NEWS:           '10'
-        run: python agent.py --now
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}  # Fallback
+        run: python src/main.py
 
-      - name: Upload logs como artefato
+      - name: Upload logs (se falhar)
+        if: failure()
         uses: actions/upload-artifact@v4
-        if: always()
         with:
-          name: agent-logs-${{ github.run_id }}
+          name: error-logs
           path: logs/
