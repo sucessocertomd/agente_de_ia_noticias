@@ -10,7 +10,7 @@ jobs:
     runs-on: ubuntu-latest
     # FIX: reduzido para 10min — o script tem timeout interno de 5min,
     # então se ultrapassar 10min algo externo travou
-    timeout-minutes: 10
+    timeout-minutes: 5
 
     steps:
       - name: Checkout
