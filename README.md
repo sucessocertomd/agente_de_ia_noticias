@@ -1,6 +1,6 @@
 # 🤖 NewsAgent — Agente Autônomo de Notícias de IA
 
-Agente que coleta, filtra, resume e envia notícias de IA e tecnologia para o seu Telegram **todo dia às 6h da manhã**, de forma 100% autônoma.
+Agente que coleta, filtra, resume e envia notícias de IA e tecnologia para o seu Telegram **todo dia às 6h da manhã (9h UTC)**, de forma 100% autônoma via **GitHub Actions** — sem servidor, sem custo de infraestrutura.
 
 ## Arquitetura
 
@@ -8,107 +8,134 @@ Agente que coleta, filtra, resume e envia notícias de IA e tecnologia para o se
 FONTES (RSS + Scraping)
        │
        ▼
- [Coleta Assíncrona]  ← aiohttp + BeautifulSoup
+ [Coleta Assíncrona]    ← aiohttp + BeautifulSoup (timeout real via ClientTimeout)
        │
        ▼
  [Filtro por Keywords]
        │
        ▼
- [Anti-duplicatas]   ← Cache local (data/seen_hashes.json)
+ [Anti-duplicatas]      ← Cache local (data/seen_hashes.json)
        │
        ▼
- [Curadoria + Resumo] ← Claude (Anthropic API)
+ [Curadoria + Resumo]   ← Groq (llama-3.3-70b) via API
        │
        ▼
- [Telegram Bot]       ← Mensagem formatada com MarkdownV2
+ [Telegram Bot]         ← Sessão isolada com force_close=True
        │
        ▼
     📱 SEU CELULAR (06h toda manhã)
+       │
+       ▼
+ [sys.exit(0)]          ← Processo encerra imediatamente
 ```
+
+## Por que o GitHub Actions não travava antes (e agora encerra corretamente)
+
+Três problemas foram corrigidos:
+
+1. **`aiohttp` timeout como `int`** — era ignorado em algumas versões do aiohttp.
+   Agora usa `aiohttp.ClientTimeout(total=10)` corretamente.
+
+2. **Sockets keep-alive órfãos** — o `TCPConnector` padrão mantém conexões abertas,
+   impedindo o event loop de fechar. Agora todos os connectors usam `force_close=True`
+   e são fechados explicitamente com `await connector.close()`.
+
+3. **Timeout global ausente** — se qualquer etapa travasse, o processo ficava preso
+   até o limite de 15 min do Actions. Agora `asyncio.wait_for(..., timeout=300)`
+   garante saída em até 5 minutos.
 
 ## Pré-requisitos
 
-- Python 3.11+
-- Conta Anthropic com API Key → https://console.anthropic.com
+- Conta Groq com API Key → https://console.groq.com
 - Bot Telegram criado via @BotFather
 - Seu Chat ID (use @userinfobot)
+- Repositório no GitHub (Actions gratuito para repositórios públicos e privados)
 
-## Instalação
+## Configuração (GitHub Actions)
+
+### 1. Fork / clone este repositório
 
 ```bash
-# 1. Clone / baixe o projeto
+git clone <seu-repo>
 cd news_agent
-
-# 2. Rode o setup automático
-chmod +x setup.sh
-./setup.sh
-
-# 3. Preencha o .env
-nano .env
-
-# 4. Teste agora mesmo (sem esperar as 6h)
-source venv/bin/activate
-python agent.py --now
 ```
 
-## Rodar como serviço permanente (Linux)
+### 2. Configure os Secrets no GitHub
 
-```bash
-# Copie o arquivo de serviço
-sudo cp news-agent.service /etc/systemd/system/
+Vá em `Settings → Secrets and variables → Actions → New repository secret`:
 
-# Edite o caminho do usuário dentro do arquivo
-sudo nano /etc/systemd/system/news-agent.service
+| Secret | Valor |
+|---|---|
+| `TELEGRAM_BOT_TOKEN` | Token do seu bot (ex: `123456:ABC-...`) |
+| `TELEGRAM_CHAT_ID` | Seu chat ID (ex: `-100123456789`) |
+| `GROQ_API_KEY` | Sua API key do Groq |
+| `AI_PROVIDER` | `groq` |
 
-# Ative e inicie
-sudo systemctl daemon-reload
-sudo systemctl enable news-agent
-sudo systemctl start news-agent
+### 3. Habilite o workflow
 
-# Veja os logs em tempo real
-sudo journalctl -u news-agent -f
+O arquivo `.github/workflows/daily_digest.yml` já está configurado.
+Após o push, vá em `Actions` no GitHub e habilite os workflows se solicitado.
+
+### 4. Teste imediatamente (sem esperar as 6h)
+
+Vá em `Actions → NewsAgent — Daily Digest → Run workflow`.
+
+## Estrutura do projeto
+
+```
+news_agent/
+├── agent.py                              ← Código principal (corrigido)
+├── requirements.txt                      ← Dependências limpas (sem APScheduler)
+├── README.md
+├── .github/
+│   └── workflows/
+│       └── daily_digest.yml              ← Cron do GitHub Actions
+└── data/
+    └── seen_hashes.json                  ← Cache anti-duplicatas (gerado em runtime)
 ```
 
-## Rodar em VPS / servidor simples
-
-```bash
-# Com nohup (continua após fechar o terminal)
-nohup python agent.py > logs/stdout.log 2>&1 &
-
-# Ver logs
-tail -f logs/agent.log
-```
+> **Nota:** `data/seen_hashes.json` não persiste entre execuções do Actions
+> (cada run cria um ambiente limpo). Para persistência real, use um Gist, S3,
+> ou faça commit do arquivo ao final de cada execução.
 
 ## Personalização
 
 Edite `agent.py`:
 
-- **`SOURCES`** — adicione ou remova fontes RSS/scraping
-- **`KEYWORDS`** — palavras-chave para filtrar relevância
-- **`SEND_HOUR / SEND_MINUTE`** — horário de envio (padrão: 06:00 Brasília)
-- **`MAX_NEWS_PER_DIGEST`** — quantas notícias por dia (padrão: 10)
+- **`sources`** — adicione ou remova fontes RSS/scraping dentro de `collect_news()`
+- **`keywords`** — palavras-chave para filtrar relevância
+- **`MAX_NEWS`** — quantas notícias por digest (padrão: 10, via env var)
+- **`GLOBAL_TIMEOUT`** — tempo máximo total em segundos (padrão: 300)
+
+Edite `daily_digest.yml`:
+
+- **`cron: '0 9 * * *'`** — horário em UTC (9h UTC = 6h Brasília)
 
 ## Custos estimados
 
 | Item | Custo mensal |
 |---|---|
-| Claude API (curadoria diária ~2k tokens) | ~$0.50 |
-| VPS básica para rodar 24/7 | ~$5.00 |
-| Telegram Bot | Grátis |
-| **Total** | **~$5.50/mês** |
+| Groq API (curadoria diária) | Gratuito (free tier generoso) |
+| GitHub Actions | Gratuito (até 2.000 min/mês em repos privados) |
+| Telegram Bot | Gratuito |
+| **Total** | **$0/mês** |
 
-## Estrutura de pastas
+## Adicionando outros providers de IA
 
-```
-news_agent/
-├── agent.py              ← Código principal
-├── requirements.txt
-├── .env.example
-├── .env                  ← Seus tokens (não commitar!)
-├── setup.sh
-├── news-agent.service    ← Daemon systemd
-├── logs/
-│   └── agent.log
-└── data/
-    └── seen_hashes.json  ← Cache anti-duplicatas
+Descomente no `requirements.txt` o provider desejado e adicione a classe correspondente em `agent.py` seguindo o mesmo padrão da `GroqProvider`:
+
+```python
+class AnthropicProvider:
+    name = "Anthropic"
+    def __init__(self):
+        import anthropic
+        self._client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
+
+    def complete(self, prompt: str) -> str:
+        msg = self._client.messages.create(
+            model="claude-3-5-haiku-20241022",
+            max_tokens=2000,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        return msg.content[0].text.strip()
 ```

@@ -1,27 +1,31 @@
-# ── Core (sempre necessário) ───────────────────────────────
+# ── Core ───────────────────────────────────────────────────
 aiohttp>=3.10.0
 beautifulsoup4>=4.12.0
 lxml>=5.2.0
-APScheduler>=3.10.4
 python-dotenv>=1.0.1
+requests>=2.32.0
 
-# ── Providers — instale apenas o que for usar ──────────────
-
-# Anthropic (Claude)
-anthropic>=0.39.0
-
-# Groq
+# ── Provider padrão (Groq) ─────────────────────────────────
 groq>=0.11.0
 
-# OpenAI e OpenRouter (ambos usam o SDK openai)
-openai>=1.54.0
+# ── Providers opcionais — descomente o que for usar ────────
+
+# Anthropic (Claude)
+# anthropic>=0.39.0
+
+# OpenAI / OpenRouter
+# openai>=1.54.0
 
 # Google Gemini
-google-generativeai>=0.8.0
+# google-generativeai>=0.8.0
 
 # Mistral AI
-mistralai>=1.2.0
+# mistralai>=1.2.0
 
 # Ollama — não precisa de SDK, usa HTTP direto
-# Instale o Ollama em: https://ollama.com
-requests>=2.32.0
+# Instale em: https://ollama.com
+
+# REMOVIDO: APScheduler — não utilizado neste fluxo.
+# O agendamento é feito pelo cron do GitHub Actions (daily_digest.yml).
+# Manter o APScheduler instalado pode induzir ao uso de BlockingScheduler,
+# que trava o processo indefinidamente.
