@@ -22,7 +22,7 @@ jobs:
           cache: 'pip'
 
       - name: Instalar dependências
-        run: |
+        run: pip install -r requirements.txt
           pip install aiohttp beautifulsoup4 lxml APScheduler python-dotenv requests
           pip install groq   # troque pelo seu provider
 
