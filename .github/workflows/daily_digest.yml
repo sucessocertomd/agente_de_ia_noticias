@@ -2,10 +2,13 @@ name: NewsAgent — Daily Digest
 
 on:
   schedule:
-    # FIX: minuto 11 em vez de 0 — evita o pico de carga do início da hora
     # 09:11 UTC = 06:11h (Horário de Brasília)
     - cron: '11 9 * * *'
   workflow_dispatch:
+
+env:
+  # Opt-in para Node.js 24 agora, antes de virar obrigatório em junho/2026
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
   digest:
@@ -14,10 +17,10 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v4.2.2
 
       - name: Setup Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v5.6.0
         with:
           python-version: '3.11'
 
@@ -29,10 +32,8 @@ jobs:
       - name: Criar pastas
         run: mkdir -p logs data
 
-      # FIX: restaura o cache de hashes entre execuções
-      # sem isso, todas as notícias são consideradas "novas" todo dia
       - name: Restaurar cache de hashes vistos
-        uses: actions/cache@v4
+        uses: actions/cache@v4.2.3
         with:
           path: data/seen_hashes.json
           key: seen-hashes-${{ runner.os }}
@@ -49,7 +50,7 @@ jobs:
         run: python agent.py
 
       - name: Upload logs como artefato
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v4.6.2
         if: always()
         with:
           name: agent-logs-${{ github.run_id }}
