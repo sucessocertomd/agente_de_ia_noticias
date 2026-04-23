@@ -1,0 +1,1 @@
+.env # NUNCA suba isso venv/ __pycache__/ *.pyc logs/ data/
