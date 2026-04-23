@@ -1,6 +1,6 @@
 """
-NewsAgent v2 — Agente autônomo de notícias de IA para Telegram
-Otimizado para GitHub Actions (Execução Efêmera)
+NewsAgent v2 — Otimizado para GitHub Actions
+Executa o digest e encerra o processo imediatamente.
 """
 
 import asyncio
@@ -15,8 +15,6 @@ from dataclasses import dataclass, field
 
 import aiohttp
 from bs4 import BeautifulSoup
-from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from apscheduler.triggers.cron import CronTrigger
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -35,38 +33,27 @@ logging.basicConfig(
 )
 log = logging.getLogger("NewsAgent")
 
-
 # ══════════════════════════════════════════════════════
-# CONFIGURAÇÃO GERAL
+# CONFIGURAÇÃO
 # ══════════════════════════════════════════════════════
 
 TELEGRAM_TOKEN   = os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
-SEND_HOUR        = int(os.getenv("SEND_HOUR", "6"))
-SEND_MINUTE      = int(os.getenv("SEND_MINUTE", "0"))
 MAX_NEWS         = int(os.getenv("MAX_NEWS", "10"))
 CACHE_FILE       = "data/seen_hashes.json"
-
-AI_PROVIDER = os.getenv("AI_PROVIDER", "anthropic").lower()
-
+AI_PROVIDER      = os.getenv("AI_PROVIDER", "groq").lower()
 
 # ══════════════════════════════════════════════════════
-# CAMADA DE PROVIDERS
+# PROVIDER IA (Apenas Groq para simplificar, adicione outros se precisar)
 # ══════════════════════════════════════════════════════
 
-class AIProvider(ABC):
-    @abstractmethod
-    def complete(self, prompt: str) -> str: ...
-    @property
-    @abstractmethod
-    def name(self) -> str: ...
-
-class GroqProvider(AIProvider):
+class GroqProvider:
     name = "Groq"
     def __init__(self):
         from groq import Groq
         self._client = Groq(api_key=os.getenv("GROQ_API_KEY"))
         self._model  = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
+
     def complete(self, prompt: str) -> str:
         resp = self._client.chat.completions.create(
             model=self._model,
@@ -75,32 +62,9 @@ class GroqProvider(AIProvider):
         )
         return resp.choices[0].message.content.strip()
 
-# (Outros providers omitidos para brevidade, mas o sistema de fábrica permanece)
-PROVIDER_MAP = {
-    "groq": GroqProvider,
-    # Adicione outros aqui se necessário
-}
-
-def build_provider() -> AIProvider:
-    cls = PROVIDER_MAP.get(AI_PROVIDER, GroqProvider)
-    provider = cls()
-    log.info(f"Provider ativo: {provider.name}")
-    return provider
-
-
 # ══════════════════════════════════════════════════════
-# FONTES E LÓGICA DE COLETA
+# COLETA E CACHE
 # ══════════════════════════════════════════════════════
-
-SOURCES = [
-    {"type": "rss",    "name": "Anthropic Blog",  "url": "https://www.anthropic.com/rss.xml"},
-    {"type": "rss",    "name": "The Verge AI",     "url": "https://www.theverge.com/rss/ai-artificial-intelligence/index.xml"},
-    {"type": "rss",    "name": "MIT Tech Review",  "url": "https://www.technologyreview.com/feed/"},
-    {"type": "rss",    "name": "VentureBeat AI",   "url": "https://venturebeat.com/category/ai/feed/"},
-    {"type": "scrape", "name": "Hacker News",      "url": "https://news.ycombinator.com/", "selector": ".titleline > a"},
-]
-
-KEYWORDS = ["claude", "anthropic", "gemini", "openai", "chatgpt", "llm", "ai agent", "deepseek"]
 
 @dataclass
 class NewsItem:
@@ -116,100 +80,81 @@ class NewsItem:
 class SeenCache:
     def __init__(self, path: str = CACHE_FILE):
         self.path = path
-        self.hashes: set[str] = set()
-        self._load()
+        self.hashes = self._load()
     def _load(self):
         try:
-            with open(self.path) as f:
-                data = json.load(f)
-            self.hashes = set(data[-1000:])
-        except: self.hashes = set()
+            with open(self.path) as f: return set(json.load(f))
+        except: return set()
     def save(self):
-        with open(self.path, "w") as f:
-            json.dump(list(self.hashes)[-1000:], f)
-    def is_new(self, item: NewsItem) -> bool: return item.hash not in self.hashes
+        with open(self.path, "w") as f: json.dump(list(self.hashes)[-1000:], f)
+    def is_new(self, item: NewsItem): return item.hash not in self.hashes
     def mark_seen(self, item: NewsItem): self.hashes.add(item.hash)
 
-async def collect_all_news() -> list[NewsItem]:
-    log.info("Coletando notícias...")
-    connector = aiohttp.TCPConnector(ssl=False)
-    async with aiohttp.ClientSession(connector=connector) as session:
-        items = []
-        for src in SOURCES:
+async def collect_news():
+    sources = [
+        {"type": "rss", "name": "The Verge AI", "url": "https://www.theverge.com/rss/ai-artificial-intelligence/index.xml"},
+        {"type": "rss", "name": "MIT Tech", "url": "https://www.technologyreview.com/feed/"},
+        {"type": "scrape", "name": "Hacker News", "url": "https://news.ycombinator.com/", "selector": ".titleline > a"}
+    ]
+    keywords = ["ai", "claude", "gpt", "llm", "google", "meta", "nvidia", "openai"]
+    items = []
+    async with aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=False)) as session:
+        for src in sources:
             try:
-                async with session.get(src["url"], timeout=15) as r:
+                async with session.get(src["url"], timeout=10) as r:
                     soup = BeautifulSoup(await r.text(), "xml" if src["type"]=="rss" else "html.parser")
-                    # Lógica simplificada de extração
-                    tags = soup.find_all("item") if src["type"]=="rss" else soup.select(src.get("selector",""))
-                    for t in tags[:15]:
+                    raw = soup.find_all("item") if src["type"]=="rss" else soup.select(src["selector"])
+                    for t in raw[:15]:
                         title = t.find("title").text if src["type"]=="rss" else t.text
                         link = t.find("link").text if src["type"]=="rss" else t.get("href")
-                        if title and link: items.append(NewsItem(title=title, url=link, source=src["name"]))
-            except Exception as e: log.warning(f"Erro em {src['name']}: {e}")
-    return [i for i in items if any(kw in (i.title).lower() for kw in KEYWORDS)]
+                        if title and any(k in title.lower() for k in keywords):
+                            items.append(NewsItem(title=title, url=link, source=src["name"]))
+            except Exception as e: log.warning(f"Erro {src['name']}: {e}")
+    return items
 
-def curate_and_summarize(items: list[NewsItem], provider: AIProvider) -> list[NewsItem]:
-    if not items: return []
-    prompt = f"Selecione as {MAX_NEWS} notícias mais importantes desta lista e resuma cada uma em 1 frase curta em Português. Retorne APENAS um JSON: [{{'index': 1, 'summary': '...', 'relevance': 10}}]. Lista: " + "\n".join([f"{idx+1}. {i.title}" for idx, i in enumerate(items[:30])])
+# ══════════════════════════════════════════════════════
+# PIPELINE E ENVIO
+# ══════════════════════════════════════════════════════
+
+async def run_digest():
+    log.info(f"═══ Iniciando NewsAgent com {AI_PROVIDER} ═══")
+    cache = SeenCache()
+    news = await collect_news()
+    new_items = [n for n in news if cache.is_new(n)]
+    
+    if not new_items:
+        log.info("Nenhuma novidade encontrada.")
+        return
+
+    provider = GroqProvider()
+    prompt = "Resuma estas notícias de IA em 1 frase curta (PT-BR). Retorne APENAS JSON: [{'index': 1, 'summary': '...', 'relevance': 10}]. Notícias:\n" + \
+             "\n".join([f"{i+1}. {n.title}" for i, n in enumerate(new_items[:20])])
+    
     try:
         raw = provider.complete(prompt).replace("```json", "").replace("```", "").strip()
-        selections = json.loads(raw)
-        res = []
-        for s in selections:
-            item = items[int(s["index"])-1]
-            item.summary, item.relevance_score = s["summary"], float(s["relevance"])
-            res.append(item)
-        return sorted(res, key=lambda x: x.relevance_score, reverse=True)
-    except: return items[:MAX_NEWS]
+        data = json.loads(raw)
+        final_list = []
+        for d in data:
+            item = new_items[int(d["index"])-1]
+            item.summary, item.relevance_score = d["summary"], float(d.get("relevance", 5))
+            final_list.append(item)
+            cache.mark_seen(item)
+        cache.save()
 
-async def send_telegram(message: str):
-    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    async with aiohttp.ClientSession() as session:
-        await session.post(url, json={"chat_id": TELEGRAM_CHAT_ID, "text": message, "parse_mode": "MarkdownV2"})
-
-# ══════════════════════════════════════════════════════
-# PIPELINE E EXECUÇÃO
-# ══════════════════════════════════════════════════════
-
-cache = SeenCache()
-provider = build_provider()
-
-async def run_daily_digest():
-    log.info("═══ Iniciando Pipeline ═══")
-    news = await collect_all_news()
-    new_news = [n for n in news if cache.is_new(n)]
-    if not new_news:
-        log.info("Sem novidades.")
-        return
-    
-    curated = curate_and_summarize(new_news, provider)
-    for i in curated: cache.mark_seen(i)
-    cache.save()
-    
-    # Formatação simplificada para exemplo
-    msg = f"🤖 *Notícias de IA — {datetime.now().strftime('%d/%m/%Y')}*\n\n"
-    for i in curated:
-        msg += f"• *{i.title}*\n_{i.summary}_\n[Link]({i.url})\n\n"
-    
-    await send_telegram(msg.replace(".", "\\.").replace("-", "\\-").replace("!", "\\!"))
-    log.info("═══ Pipeline Concluído ═══")
-
-async def main():
-    # MODO GITHUB ACTIONS (Executa e encerra)
-    if "--now" in sys.argv:
-        log.info("Execução única iniciada...")
-        await run_daily_digest()
-        log.info("Trabalho feito. Encerrando processo para poupar recursos.")
-        return 
-
-    # MODO SERVIDOR (Para rodar localmente ou em VPS)
-    scheduler = AsyncIOScheduler(timezone="America/Sao_Paulo")
-    scheduler.add_job(run_daily_digest, CronTrigger(hour=SEND_HOUR, minute=SEND_MINUTE))
-    scheduler.start()
-    log.info(f"Servidor aguardando próximo envio às {SEND_HOUR:02d}:{SEND_MINUTE:02d}")
-    try:
-        while True: await asyncio.sleep(3600)
-    except (KeyboardInterrupt, SystemExit): pass
+        # Envio Telegram
+        msg = f"🤖 *IA Digest — {datetime.now().strftime('%d/%m/%Y')}*\n\n"
+        for i in sorted(final_list, key=lambda x: x.relevance_score, reverse=True)[:MAX_NEWS]:
+            msg += f"• *{i.title}*\n_{i.summary}_\n[Link]({i.url})\n\n"
+        
+        url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
+        async with aiohttp.ClientSession() as session:
+            await session.post(url, json={"chat_id": TELEGRAM_CHAT_ID, "text": msg, "parse_mode": "Markdown"})
+        log.info("Mensagem enviada com sucesso!")
+    except Exception as e:
+        log.error(f"Falha no pipeline: {e}")
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    # EXECUÇÃO E ENCERRAMENTO IMEDIATO
+    asyncio.run(run_digest())
+    log.info("Processo finalizado. Saindo...")
+    sys.exit(0) # Força a saída para o GitHub Actions
