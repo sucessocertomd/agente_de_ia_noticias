@@ -1,0 +1,27 @@
+# ── Core (sempre necessário) ───────────────────────────────
+aiohttp>=3.10.0
+beautifulsoup4>=4.12.0
+lxml>=5.2.0
+APScheduler>=3.10.4
+python-dotenv>=1.0.1
+
+# ── Providers — instale apenas o que for usar ──────────────
+
+# Anthropic (Claude)
+anthropic>=0.39.0
+
+# Groq
+groq>=0.11.0
+
+# OpenAI e OpenRouter (ambos usam o SDK openai)
+openai>=1.54.0
+
+# Google Gemini
+google-generativeai>=0.8.0
+
+# Mistral AI
+mistralai>=1.2.0
+
+# Ollama — não precisa de SDK, usa HTTP direto
+# Instale o Ollama em: https://ollama.com
+requests>=2.32.0
